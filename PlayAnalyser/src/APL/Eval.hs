@@ -12,104 +12,96 @@ import Data.Functor.Classes (eq1)
 data Val
   = ValInt Integer
   | ValBool Bool
-  | ValFun RangeList VName Exp
+  | ValFun Ranges VName Exp
   deriving (Eq, Show)
 
+type UnboundRange = (Val, Val)
 
-type Range = (Val, Val)
+type Range = (VName, UnboundRange)
 
-type RangeList = [(VName, Range)]
+type Ranges = [Range]
 
-rangesEmpty :: RangeList
+
+getName :: Range -> VName
+getName range = fst range
+
+getMin :: Range -> Val
+getMin range = fst $ snd range
+
+getMax :: Range -> Val
+getMax range = snd $ snd range
+
+rangesEmpty :: Ranges
 rangesEmpty = []
 
-rangesExtend :: VName -> Val -> RangeList -> RangeList
-rangesExtend v val ranges = (v, (val, val)) : ranges
+double :: Val -> UnboundRange
+double val = (val, val)
 
-rangesLookup :: VName -> RangeList -> Maybe Range
-rangesLookup v ranges = lookup v ranges
+rangeWiden :: Range -> Ranges -> Ranges
+rangeWiden range (range' : ranges) = do
+  if getName range == getName range' 
+  then (getName range, (min (getMin range) (getMin range'), max (getMax range) (getMax range'))) : ranges
+  else range' : rangeWiden range ranges
+
+rangeExtend :: Range -> Ranges -> Ranges
+rangeExtend range ranges = do
+  case lookup (fst range) ranges of
+    Nothing -> range : ranges
+    Just _ -> rangeWiden range ranges
+
+
+rangesUnion :: Ranges -> Ranges -> Ranges
+rangesUnion (range : ranges) ranges' = rangesUnion ranges (rangeExtend range ranges')
+rangesUnion [] ranges' = ranges'
 
 type Error = String
 
-newtype EvalM a = EvalM (RangeList -> Either Error a)
-
-instance Functor EvalM where
-  fmap = liftM
-
-instance Applicative EvalM where
-  pure x = EvalM $ \_ranges -> Right x
-  (<*>) = ap
-
-instance Monad EvalM where
-  EvalM x >>= f = EvalM $ \ranges ->
-    case x ranges of
-      Left err -> Left err
-      Right x' ->
-        let EvalM y = f x'
-         in y ranges
-
-askList :: EvalM RangeList
-askList = EvalM $ \ranges -> Right ranges
-
-localList :: (RangeList -> RangeList) -> EvalM a -> EvalM a
-localList f (EvalM m) = EvalM $ \ranges -> m (f ranges)
-
-failure :: String -> EvalM a
-failure s = EvalM $ \_ranges -> Left s
-
-catch :: EvalM a -> EvalM a -> EvalM a
-catch (EvalM m1) (EvalM m2) = EvalM $ \ranges ->
-  case m1 ranges of
-    Left _ -> m2 ranges
-    Right x -> Right x
-
-runEval :: EvalM a -> Either Error a
-runEval (EvalM m) = m rangesEmpty
-
-
 -- Returns final stage of fixpoint iteration
-abstractFixpoint :: Exp -> RangeList
+abstractFixpoint :: Exp -> Ranges
 abstractFixpoint e = do
   -- oldpoint <- []
-  case eval e of
-    _ -> localList
+  snd $ eval rangesEmpty  e
   
 
-
-evalIntBinOp :: (Integer -> Integer -> EvalM Integer) -> Exp -> Exp -> EvalM Val
-evalIntBinOp f e1 e2 = do
-  v1 <- eval e1
-  v2 <- eval e2
+evalIntBinOp :: Ranges (Integer -> Integer -> Integer) -> Exp -> Exp -> (UnboundRange, Ranges)
+evalIntBinOp ranges f e1 e2 = do
+  v1 <- eval ranges e1
+  v2 <- eval ranges e2
   case (v1, v2) of
-    (ValInt x, ValInt y) -> ValInt <$> f x y
-    (_, _) -> failure "Non-integer operand"
+    (ValInt x, ValInt y) -> (double $ ValInt $ f x y, rangesEmpty)
 
-evalIntBinOp' :: (Integer -> Integer -> Integer) -> Exp -> Exp -> EvalM Val
-evalIntBinOp' f e1 e2 =
-  evalIntBinOp f' e1 e2
-  where
-    f' x y = pure $ f x y
+eval :: Ranges -> Exp -> (UnboundRange, Ranges)
+eval ranges (CstInt x) = (double $ ValInt x, ranges)
+eval ranges (CstBool b) = (double $ ValBool b, ranges)
+eval ranges (Var v) = do
+  case lookup v ranges of
+    Right val -> (double $ val, ranges) 
+    Left _ -> (double $ ValBool True, ranges) 
+eval ranges (Add e1 e2) = evalIntBinOp ranges (+) e1 e2
+eval ranges (Sub e1 e2) = evalIntBinOp ranges (-) e1 e2
+eval ranges (Mul e1 e2) = evalIntBinOp ranges (*) e1 e2
+eval ranges (Div e1 e2) = evalIntBinOp ranges (div) e1 e2
+eval ranges (Pow e1 e2) = evalIntBinOp ranges (^) e1 e2
+eval ranges (Eql e1 e2) = UnboundRange (ValBool True) (ValBool False)
+eval ranges (If cond e1 e2) = do
+  case (eval ranges e2, eval ranges e2) of
+    (val1, ranges1, val2, ranges2) -> 
+      (UnboundRange val1 val2, rangesUnion ranges1 ranges2)
+eval ranges (Let var e1 e2) = do
+  (unboundRange, ranges') <- eval ranges e1 
+  boundRange <- (var, unboundRange) 
+  newRanges <- rangeExtend boundRange ranges'
+  eval ranges' e2 newRanges
 
-eval :: Exp -> EvalM Val
-eval (CstInt x) = pure $ ValInt x
-eval (CstBool b) = pure $ ValBool b
-eval (Var v) = pure $ ValBool True
-eval (Add e1 e2) = evalIntBinOp' (+) e1 e2
-eval (Sub e1 e2) = evalIntBinOp' (-) e1 e2
-eval (Mul e1 e2) = evalIntBinOp' (*) e1 e2
-eval (Div e1 e2) = evalIntBinOp' (div) e1 e2
-eval (Pow e1 e2) = evalIntBinOp' (^) e1 e2
-eval (Eql e1 e2) = pure $ ValBool True
-eval (If cond e1 e2) = eval e2 $ eval e1
-eval (Let var e1 e2) = eval e2 $ localList (rangesExtend var (eval e1))
-eval (Lambda var body) = do
-  ranges <- askList
-  pure $ ValFun ranges var body
-eval (Apply e1 e2) = do
-  v1 <- eval e1
-  v2 <- eval e2
-  case (v1, v2) of
-    (ValFun f_env var body, arg) ->
-      localList (const $ rangesExtend var arg f_env) $ eval body
-eval (TryCatch e1 e2) =
-  eval e1 `catch` eval e2
+
+-- eval ranges (Lambda var body) = do
+--   ranges <- askList
+--   pure $ ValFun ranges var body
+-- eval ranges (Apply e1 e2) = do
+--   v1 <- eval e1
+--   v2 <- eval e2
+--   case (v1, v2) of
+--     (ValFun f_env var body, arg) ->
+--       localList (const $ rangesExtend var arg f_env) $ eval body
+-- eval ranges (TryCatch e1 e2) =
+--   eval e1 `catch` eval e2
