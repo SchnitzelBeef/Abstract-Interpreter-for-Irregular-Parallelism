@@ -10,5 +10,5 @@ tests =
   testGroup
     "Abstract"
     [ testCase "Let" $
-        abstractFixpoint (Let (Var "x") (5))  @?= ["x", (5, 5)]
+        abstractFixpoint (Let "x" (CstInt 5) (Add (Var "x") (CstInt 2)))  @?= [("x", [])]
     ]

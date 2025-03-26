@@ -1,0 +1,7 @@
+Test suite week2-test: RUNNING...
+Abstract
+  Let: OK (0.02s)
+
+All 1 tests passed (0.04s)
+Test suite week2-test: PASS
+Test suite logged to: /mnt/e/bachelorprojekt/Abtract-Interpreter-for-Irregular-Parallelism/PlayAnalyser/dist-newstyle/build/x86_64-linux/ghc-8.8.4/week2-1.0.0.0/t/week2-test/test/week2-1.0.0.0-week2-test.log
