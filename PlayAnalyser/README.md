@@ -12,10 +12,10 @@ Since the language is functional and has immutable variables, the interpreter ha
 
 Testing is done in "Eval_tests.hs". Interpreting the following let bindings:
 
-(Let "y" (RandomInt (CstInt 1) (CstInt 5)) 
-    (Let "x" (RandomInt (CstInt 1) (CstInt 10)) 
-        (Let "z" (Add (Var "x") (Var "y"))
-            (Var "z")))) 
+    (Let "y" (RandomInt (CstInt 1) (CstInt 5)) 
+        (Let "x" (RandomInt (CstInt 1) (CstInt 10)) 
+            (Let "z" (Add (Var "x") (Var "y"))
+                (Var "z")))) 
 
 ... yields the result:            
 
