@@ -1,4 +1,4 @@
-#Play analyzer 
+# Play analyzer 
 Abstract interpreter of the (slightly extended) APL language provided by Troels Henriksen
 
 The interpreter makes sound - yet nowhere tight - abstractions on the language.
