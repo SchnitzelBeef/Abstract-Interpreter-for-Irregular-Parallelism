@@ -1,33 +1,39 @@
 module APL.Eval
   ( Val (..),
     Env,
-    envEmpty,
+    eval,
     runEval,
-    abstractFixpoint
+    Error,
   )
 where
 
 import APL.AST (Exp (..), VName)
 import Control.Monad (ap, liftM)
-import Data.Functor.Classes (eq1)
 
+{- "Val" datatype consists of "sets" of booleans and ranges of integers or None-}
 data Val
-  = ValInt Integer
-  | ValBool Bool
-  -- | ValFun Ranges VName Exp
+  = ValBool Bool
+  | ValFun Env VName Exp
+  | ValIntRange Integer Integer 
+  | ValBoolBoth                 
+  | None                        
   deriving (Eq, Show)
 
-type UnboundRanges = [(Val, Val)]
+eval' :: Env -> Exp -> Either Error Val
+eval' env = runEval env . eval
 
-type BoundRange = (VName, UnboundRanges)
-
-type Env = [BoundRange]
+type Env = [(VName, Val)]
 
 envEmpty :: Env
 envEmpty = []
 
-envAppend :: VName -> Env -> Env
-envAppend v env = (v, []) : env 
+envExtend :: VName -> Val -> Env -> Env
+envExtend v val env = (v, val) : env
+
+envLookup :: VName -> Env -> Maybe Val
+envLookup v env = lookup v env
+
+type Error = String
 
 newtype EvalM a = EvalM (Env -> Either Error a)
 
@@ -61,137 +67,142 @@ catch (EvalM m1) (EvalM m2) = EvalM $ \env ->
     Left _ -> m2 env
     Right x -> Right x
 
-runEval :: EvalM a -> Either Error a
-runEval (EvalM m) = m envEmpty
+runEval :: Env -> EvalM a -> Either Error a
+runEval env (EvalM m) = m env
 
--- getName :: Range -> VName
--- getName range = fst range
+{- | Compares two ranges to check for complete equality -}
+rangeCompare :: Val -> Val -> Bool
+rangeCompare val1 val2 = 
+  case (val1, val2) of
+    (ValIntRange int1 int2, ValIntRange int3 int4) -> int1 == int3 && int2 == int4
+    (ValBool x, ValBool y) -> x == y
+    (ValBoolBoth, ValBoolBoth) -> True
+    (None, None) -> True
+    (_, _) -> False -- Could throw error instead
 
--- getMin :: Range -> Val
--- getMin range = fst $ snd range
+{- | Intersects two ranges -}
+rangeIntersect :: Exp -> Exp -> EvalM Val
+rangeIntersect e1 e2 = do
+  v1 <- eval e1
+  v2 <- eval e2
+  case (v1, v2) of
+    (ValBoolBoth, ValBool y) -> pure $ ValBool y
+    (ValBool x, ValBoolBoth) -> pure $ ValBool x
+    (ValBool x, ValBool y) -> if x == y
+      then pure $ ValBool x else pure None
+    (ValIntRange int1 int2, ValIntRange int3 int4) -> if int2 >= int3 && int4 >= int1 -- Normal rectangle 2d collision
+      then pure $ ValIntRange (max int1 int3) (min int2 int4) else pure None
+    (None, _) -> pure None
+    (_, None) -> pure None
+    (_, _) -> failure "Incompatible types in rangeIntersect"
 
--- getMax :: Range -> Val
--- getMax range = snd $ snd range
-
--- double :: Val -> UnboundRange
--- double val = (val, val)
-
--- rangeWiden :: Range -> Ranges -> Ranges
--- rangeWiden range (range' : ranges) = do
---   if getName range == getName range' 
---   then (getName range, (min (getMin range) (getMin range'), max (getMax range) (getMax range'))) : ranges
---   else range' : rangeWiden range ranges
-
--- rangeExtend :: Range -> Ranges -> Ranges
--- rangeExtend range ranges = do
---   case lookup (fst range) ranges of
---     Nothing -> range : ranges
---     Just _ -> rangeWiden range ranges
+{- | Unions two ranges -}
+rangeUnion :: Exp -> Exp -> EvalM Val
+rangeUnion e1 e2 = do
+  v1 <- eval e1
+  v2 <- eval e2
+  case (v1, v2) of
+    (ValBoolBoth, ValBool _) -> pure ValBoolBoth 
+    (ValBool _, ValBoolBoth) -> pure ValBoolBoth 
+    (ValBool x, ValBool y) -> if x /= y
+      then pure ValBoolBoth else pure $ ValBool x
+    (ValIntRange int1 int2, ValIntRange int3 int4) -> pure $ ValIntRange (min int1 int3) (max int2 int4)
+    (None, y) -> pure y
+    (x, None) -> pure x
+    (_, _) -> failure "Incompatible types rangeUnion"
 
 
--- rangesUnion :: Ranges -> Ranges -> Ranges
--- rangesUnion (range : ranges) ranges' = rangesUnion ranges (rangeExtend range ranges')
--- rangesUnion [] ranges' = ranges'
+evalIntBinOp :: (Integer -> Integer -> Integer) -> Exp -> Exp -> EvalM Val
+evalIntBinOp f e1 e2 = do
+  v1 <- eval e1
+  v2 <- eval e2
+  case (v1, v2) of
+    (ValIntRange int1 int2, ValIntRange int3 int4) -> 
+      let vals = [f int1 int3, f int1 int4, f int2 int3, f int2 int4]
+      in pure $ ValIntRange (minimum vals) (maximum vals)
+    (_, _) -> failure "Non-integer operand"
 
-type Error = String
-
-locateidentifiers :: Exp -> Env
-locateidentifiers (Var v) = envEmpty
-locateidentifiers (Let v e1 e2) = (envAppend v envEmpty) ++ (locateidentifiers e1) ++ (locateidentifiers e2) 
-locateidentifiers (Lambda v e1) = (envAppend v envEmpty) ++ (locateidentifiers e1)
-locateidentifiers (CstInt x) = envEmpty
-locateidentifiers (CstBool b) = envEmpty
-locateidentifiers (Add e1 e2) = (locateidentifiers e1) ++ (locateidentifiers e2)
-locateidentifiers (Sub e1 e2) = (locateidentifiers e1) ++ (locateidentifiers e2)
-locateidentifiers (Mul e1 e2) = (locateidentifiers e1) ++ (locateidentifiers e2)
-locateidentifiers (Div e1 e2) = (locateidentifiers e1) ++ (locateidentifiers e2)
-locateidentifiers (Pow e1 e2) = (locateidentifiers e1) ++ (locateidentifiers e2)
-locateidentifiers (Eql e1 e2) = (locateidentifiers e1) ++ (locateidentifiers e2)
-locateidentifiers (If cond e1 e2) = (locateidentifiers e1) ++ (locateidentifiers e2)
-locateidentifiers (Apply e1 e2) = (locateidentifiers e1) ++ (locateidentifiers e2)
--- eval ranges (TryCatch e1 e2) = 
-
--- -- Returns final stage of fixpoint iteration
-abstractFixpoint :: Exp -> Env
-abstractFixpoint e = do
-  locateidentifiers e $ map (\v -> eval v)
-  askEnv
-
-  
-eval :: Env -> Exp -> Env
-eval env (CstInt x) = ValInt x
-eval env (CstBool b) = ValBool b
-eval env (Var v) = 
-  do
-  case lookup v env of
-    Right val -> (double $ val, env) 
-    Left _ -> (double $ ValBool True, env) 
-eval env (Add e1 e2) = evalIntBinOp env (+) e1 e2
-eval env (Sub e1 e2) = evalIntBinOp env (-) e1 e2
-eval env (Mul e1 e2) = evalIntBinOp env (*) e1 e2
-eval env (Div e1 e2) = evalIntBinOp env (div) e1 e2
-eval env (Pow e1 e2) = evalIntBinOp env (^) e1 e2
-eval env (Eql e1 e2) = ((ValBool True) (ValBool False), env)
-eval env (If cond e1 e2) = do
-
-  case (eval env e2, eval env e2) of
-    (val1, ranges1, val2, ranges2) -> 
-      (val1 val2, rangesUnion ranges1 ranges2)
-eval env (Let var e1 e2) = do
-  e1' <- eval state e1 
-  eval (updateState env e1') e2
-eval env (Lambda var body) = do
-  env <- askList
+eval :: Exp -> EvalM Val
+eval (CstInt x) = pure $ ValIntRange x x
+eval (CstBool b) = pure $ ValBool b
+eval (Var v) = do
+  env <- askEnv
+  case envLookup v env of
+    Just x -> pure x
+    Nothing -> failure $ "Unknown variable: " ++ v
+eval (Add e1 e2) = evalIntBinOp (+) e1 e2
+eval (Sub e1 e2) = evalIntBinOp (-) e1 e2
+eval (Mul e1 e2) = evalIntBinOp (*) e1 e2
+eval (Div e1 e2) = do
+  v <- eval e2
+  case v of
+    (ValIntRange int1 int2) ->
+      if int1 <= 0 && int2 >= 0
+        then pure None
+        else evalIntBinOp div e1 e2
+    _ -> failure "Non-int range in division"
+eval (Pow e1 e2) = do
+  v <- eval e2
+  case v of
+    (ValIntRange int1 int2) ->
+      if int1 < 0
+        then pure None
+        else evalIntBinOp (^) e1 e2
+    _ -> failure "Non-int range in power"
+eval (Eql e1 e2) = do
+  v1 <- eval e1
+  v2 <- eval e2
+  case (v1, v2) of
+    (ValBool x, ValBool y) -> pure $ ValBool $ x == y -- Potential complete overlap
+    (ValBoolBoth, ValBool _) -> pure ValBoolBoth      -- Overlapping values
+    (ValBool _, ValBoolBoth) -> pure ValBoolBoth      -- Overlapping values
+    (ValBoolBoth, ValBoolBoth) -> pure ValBoolBoth    -- Overlapping values
+    (ValIntRange int1 int2, ValIntRange int3 int4) -> if int1 == int4 && int2 == int3
+      then pure $ ValBool True             -- One element complete overlap
+      else if int2 >= int3 && int4 >= int1 -- Normal rectangle 2d collision
+        then pure ValBoolBoth              -- Overlapping ranges
+        else pure $ ValBool False          -- Non-overlapping ranges
+    (_, _) -> failure "Invalid operands to equality"
+eval (If cond e1 e2) = do
+  cond' <- eval cond
+  case cond' of
+    ValBool True -> eval e1
+    ValBool False -> eval e2
+    ValBoolBoth -> rangeUnion e1 e2        -- Both conditions possible? Union!
+    _ -> failure "Non-boolean conditional."
+eval (Let var e1 e2) = do
+  v1 <- eval e1
+  localEnv (envExtend var v1) $ eval e2
+eval (Lambda var body) = do
+  env <- askEnv
   pure $ ValFun env var body
-eval env (Apply e1 e2) = do
+eval (Apply e1 e2) = do
   v1 <- eval e1
   v2 <- eval e2
   case (v1, v2) of
     (ValFun f_env var body, arg) ->
-      localList (const $ envExtend var arg f_env) $ eval body
-eval env (TryCatch e1 e2) =
+      localEnv (const $ envExtend var arg f_env) $ eval body
+    (_, _) ->
+      failure "Cannot apply non-function"
+eval (TryCatch e1 e2) =
   eval e1 `catch` eval e2
-
-
-
-
--- evalIntBinOp :: Ranges -> (Integer -> Integer -> Integer) -> Exp -> Exp -> (UnboundRange, Ranges)
--- evalIntBinOp ranges f e1 e2 = do
---   v1 <- eval ranges e1
---   v2 <- eval ranges e2
---   case (v1, v2) of
---     ((ValInt x, _), (ValInt y, _)) -> (double $ ValInt $ f x y, rangesEmpty)
-
--- eval :: Ranges -> Exp -> (UnboundRange, Ranges)
--- eval ranges (CstInt x) = (double $ ValInt x, ranges)
--- eval ranges (CstBool b) = (double $ ValBool b, ranges)
--- eval ranges (Var v) = do
---   case lookup v ranges of
---     Right val -> (double $ val, ranges) 
---     Left _ -> (double $ ValBool True, ranges) 
--- eval ranges (Add e1 e2) = evalIntBinOp ranges (+) e1 e2
--- eval ranges (Sub e1 e2) = evalIntBinOp ranges (-) e1 e2
--- eval ranges (Mul e1 e2) = evalIntBinOp ranges (*) e1 e2
--- eval ranges (Div e1 e2) = evalIntBinOp ranges (div) e1 e2
--- eval ranges (Pow e1 e2) = evalIntBinOp ranges (^) e1 e2
--- eval ranges (Eql e1 e2) = ((ValBool True) (ValBool False), ranges)
--- eval ranges (If cond e1 e2) = do
---   case (eval ranges e2, eval ranges e2) of
---     (val1, ranges1, val2, ranges2) -> 
---       (val1 val2, rangesUnion ranges1 ranges2)
--- eval ranges (Let var e1 e2) = do
---   (unboundRange, ranges') <- eval ranges e1 
---   boundRange <- (var, unboundRange) 
---   newRanges <- rangeExtend boundRange ranges'
---   eval ranges' e2 newRanges
--- -- eval ranges (Lambda var body) = do
--- --   ranges <- askList
--- --   pure $ ValFun ranges var body
--- -- eval ranges (Apply e1 e2) = do
--- --   v1 <- eval e1
--- --   v2 <- eval e2
--- --   case (v1, v2) of
--- --     (ValFun f_env var body, arg) ->
--- --       localList (const $ rangesExtend var arg f_env) $ eval body
--- -- eval ranges (TryCatch e1 e2) =
--- --   eval e1 `catch` eval e2
+eval (RandomInt e1 e2) = do
+  v1 <- eval e1
+  v2 <- eval e2
+  case (v1, v2) of
+    (ValIntRange int1 int2, ValIntRange int3 int4) -> pure $ ValIntRange (min int1 int3) (max int3 int4)
+    _ -> failure "Non-integer found in RandomInt."
+eval (Loop p pe i ie body) = do -- Hideous code for for-loop (sorry): 
+  v1 <- eval ie
+  v2 <- eval pe
+  case v1 of
+    ValIntRange int1 int2 -> 
+      case (runEval [] (loop v2 (0, int1)), runEval [] (loop v2 (0, int2))) of
+        (Right (ValIntRange v1' v1''), Right (ValIntRange v2' v2'')) -> pure $ ValIntRange (min v1' v2') (max v1'' v2'') 
+        (Left err1, Left err2) -> failure $ err1 ++ err2  -- *Should* be impossible :-)
+    _ -> failure "Non-valid loop termination"
+  where loop acc (j, n) = do
+          v3 <- localEnv (const $ envExtend i (ValIntRange j j) (envExtend p acc envEmpty)) $ eval body 
+          if j < n
+            then loop v3 (j+1, n)
+            else pure acc
