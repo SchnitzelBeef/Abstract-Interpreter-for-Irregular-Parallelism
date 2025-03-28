@@ -19,9 +19,6 @@ data Val
   | None                        
   deriving (Eq, Show)
 
-eval' :: Env -> Exp -> Either Error Val
-eval' env = runEval env . eval
-
 type Env = [(VName, Val)]
 
 envEmpty :: Env
@@ -69,32 +66,6 @@ catch (EvalM m1) (EvalM m2) = EvalM $ \env ->
 
 runEval :: Env -> EvalM a -> Either Error a
 runEval env (EvalM m) = m env
-
-{- | Compares two ranges to check for complete equality -}
-rangeCompare :: Val -> Val -> Bool
-rangeCompare val1 val2 = 
-  case (val1, val2) of
-    (ValIntRange int1 int2, ValIntRange int3 int4) -> int1 == int3 && int2 == int4
-    (ValBool x, ValBool y) -> x == y
-    (ValBoolBoth, ValBoolBoth) -> True
-    (None, None) -> True
-    (_, _) -> False -- Could throw error instead
-
-{- | Intersects two ranges -}
-rangeIntersect :: Exp -> Exp -> EvalM Val
-rangeIntersect e1 e2 = do
-  v1 <- eval e1
-  v2 <- eval e2
-  case (v1, v2) of
-    (ValBoolBoth, ValBool y) -> pure $ ValBool y
-    (ValBool x, ValBoolBoth) -> pure $ ValBool x
-    (ValBool x, ValBool y) -> if x == y
-      then pure $ ValBool x else pure None
-    (ValIntRange int1 int2, ValIntRange int3 int4) -> if int2 >= int3 && int4 >= int1 -- Normal rectangle 2d collision
-      then pure $ ValIntRange (max int1 int3) (min int2 int4) else pure None
-    (None, _) -> pure None
-    (_, None) -> pure None
-    (_, _) -> failure "Incompatible types in rangeIntersect"
 
 {- | Unions two ranges -}
 rangeUnion :: Exp -> Exp -> EvalM Val
@@ -144,7 +115,7 @@ eval (Div e1 e2) = do
 eval (Pow e1 e2) = do
   v <- eval e2
   case v of
-    (ValIntRange int1 int2) ->
+    (ValIntRange int1 _) ->
       if int1 < 0
         then pure None
         else evalIntBinOp (^) e1 e2
@@ -190,7 +161,7 @@ eval (RandomInt e1 e2) = do
   v1 <- eval e1
   v2 <- eval e2
   case (v1, v2) of
-    (ValIntRange int1 int2, ValIntRange int3 int4) -> pure $ ValIntRange (min int1 int3) (max int3 int4)
+    (ValIntRange int1 int2, ValIntRange int3 int4) -> pure $ ValIntRange (min int1 int3) (max int2 int4)
     _ -> failure "Non-integer found in RandomInt."
 eval (Loop p pe i ie body) = do -- Hideous code for for-loop (sorry): 
   v1 <- eval ie
@@ -200,6 +171,7 @@ eval (Loop p pe i ie body) = do -- Hideous code for for-loop (sorry):
       case (runEval [] (loop v2 (0, int1)), runEval [] (loop v2 (0, int2))) of
         (Right (ValIntRange v1' v1''), Right (ValIntRange v2' v2'')) -> pure $ ValIntRange (min v1' v2') (max v1'' v2'') 
         (Left err1, Left err2) -> failure $ err1 ++ err2  -- *Should* be impossible :-)
+        (_, _) -> failure "Loop evaluated to non-integer range"
     _ -> failure "Non-valid loop termination"
   where loop acc (j, n) = do
           v3 <- localEnv (const $ envExtend i (ValIntRange j j) (envExtend p acc envEmpty)) $ eval body 
