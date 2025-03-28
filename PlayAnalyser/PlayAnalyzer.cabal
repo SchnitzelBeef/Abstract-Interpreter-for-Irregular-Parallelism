@@ -1,5 +1,5 @@
 cabal-version:      3.0
-name:               week2
+name:               PlayAnalyzer
 version:            1.0.0.0
 build-type:         Simple
 
@@ -27,4 +27,4 @@ test-suite week2-test
     build-depends:
         base
       , tasty
-      , week2
+      , PlayAnalyzer
