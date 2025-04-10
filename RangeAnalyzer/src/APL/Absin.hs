@@ -89,10 +89,10 @@ rangesJoin (RangeTuple lst1) (RangeTuple lst2) = RangeTuple $ tupleJoin lst1 lst
 --   | int2 >= int3 && int4 >= int1 = Range (min int1 int3) (max int2 int4) -- Overlap of intervals 
 --   | int2 < int3 = RangeTuple [Range int1 int2, Range int3 int4]
 --   | otherwise = RangeTuple [Range int3 int4, Range int1 int2]
-rangesJoin any RangeBottom = any
-rangesJoin RangeBottom any = any
 rangesJoin _ RangeTop = RangeTop
 rangesJoin RangeTop _ = RangeTop
+rangesJoin any RangeBottom = any
+rangesJoin RangeBottom any = any
 -- rangesJoin any (int1, int2) = rangesJoin (int1, int2) any 
 
 tupleIntersect :: [Range] -> [Range] -> [Range]
@@ -119,10 +119,10 @@ rangesIntersect (RangeTuple lst1) (RangeTuple lst2) =
 --   | int2 >= int3 && int4 >= int1 = Range (min int1 int3) (max int2 int4) -- Overlap of intervals 
 --   | int2 < int3 = RangeTuple [Range int1 int2, Range int3 int4]
 --   | otherwise = RangeTuple [Range int3 int4, Range int1 int2]
-rangesIntersect _ RangeBottom = RangeBottom
-rangesIntersect RangeBottom _ = RangeBottom
-rangesIntersect any RangeTop = any
-rangesIntersect RangeTop any = any
+rangesIntersect any RangeBottom = any
+rangesIntersect RangeBottom any = any
+rangesIntersect _ RangeTop = RangeTop
+rangesIntersect RangeTop _ = RangeTop
 -- rangesIntersect any (int1, int2) = rangesIntersect (int1, int2) any 
 
 envIntersect :: Env -> Env -> Env
@@ -144,16 +144,17 @@ freeVNames (Eql e1 e2) = freeVNames e1 `envIntersect` freeVNames e2
 freeVNames (If e1 e2 e3) = freeVNames e1 `envIntersect` freeVNames e2 `envIntersect` freeVNames e3 
 freeVNames (Tuple exps) = foldl (\acc elm -> acc `envIntersect` freeVNames elm) envEmpty exps
 freeVNames (Project e _) = freeVNames e
-freeVNames (Var name) = [(name, RangeTop)]
-freeVNames (Lambda name e) = [(name, RangeTop)] `envIntersect` freeVNames e
+freeVNames (Var name) = [(name, RangeBottom)]
+freeVNames (Lambda name e) = [(name, RangeBottom)] `envIntersect` freeVNames e
 freeVNames (Apply e1 e2) = freeVNames e1 `envIntersect` freeVNames e2  
-freeVNames (ForLoop (name1, e1) (name2, e2) e3) = [(name1, RangeTop)] `envIntersect` [(name2, RangeTop)] `envIntersect` freeVNames e1 `envIntersect` freeVNames e2 `envIntersect` freeVNames e3 
+freeVNames (ForLoop (name1, e1) (name2, e2) e3) = [(name1, RangeBottom)] `envIntersect` [(name2, RangeBottom)] `envIntersect` freeVNames e1 `envIntersect` freeVNames e2 `envIntersect` freeVNames e3 
 
 binopRange :: (Int -> Int -> Int) -> RangeVal -> RangeVal -> RangeVal
-binopRange _ RangeBottom _ = RangeBottom
-binopRange _ _ RangeBottom = RangeBottom
 binopRange _ RangeTop _ = RangeTop
 binopRange _ _ RangeTop = RangeTop 
+binopRange _ RangeBottom any = RangeTop -- This logic might be a bit iffy
+binopRange _ any RangeBottom = RangeTop -- This logic might be a bit iffy
+binopRange _ RangeBottom RangeBottom = RangeBottom
 binopRange _ (RangeTuple []) a = RangeTuple []
 binopRange _ a (RangeTuple []) = RangeTuple []
 binopRange op lst1@(RangeTuple ((int1, int2):rest1)) lst2@(RangeTuple ((int3, int4):rest2)) =

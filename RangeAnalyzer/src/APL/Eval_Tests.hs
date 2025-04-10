@@ -13,7 +13,10 @@ tests :: TestTree
 tests =
   testGroup
     "Abstract"
-    [ testCase "Add" $
+    [ testCase "Free variables" $
+        ranges' [] (Var "x")
+          @?= Right RangeBottom,
+      testCase "Add" $
         ranges' [] (Add (CstInt 3) (Add (CstInt 1) (CstInt 10)))
           @?= Right (RangeTuple [(14, 14)]),
       testCase "Add with environment" $
