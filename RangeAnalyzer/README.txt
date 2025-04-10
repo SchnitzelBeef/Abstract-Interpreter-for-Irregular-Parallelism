@@ -1,28 +1,29 @@
 ## Play analyzer 
-Abstract interpreter of the (slightly extended) APL language provided by Troels Henriksen
+Abstract interpreter of the (slightly reduced) APL language provided by Troels Henriksen
 
-The interpreter makes sound - yet nowhere tight - abstractions on the language.
-This includes integer ranges and boolean values a variable may take.
+The interpreter makes sound - yet nowhere tight - abstractions on a given expression of the language.
+This solely includes integer ranges. If the expression returns a boolean, a value "RangeBottom" is returned instead to denote the lack of information. This is also true for the return of free variables in some circumstances, where we can't deduce that the type is an integer. For example, adding a free variable "x" to a constant in the test:
 
-Currently, the interpreter only forms forms a "single-file" lattice since the datatype "UnboundValues" (see Absin.hs) only exists of a single range at a time.
-This means that if a variable can take a value -2 and 2, it will be abstracted into all values in the range [-2, -1, ..., 2], instead of the tighter [[-2, -2], [2, 2]]
-This would be the next step of improvements to split this into two separate abstractions for the same identifier for a more meaningful analysis.
+    ranges' [] (Add (CstInt 3) (Var "x"))
 
-Since the language is functional and has immutable variables, the interpreter has an "easy" time evaluating the span of an identifier only once.
+gives the result "RangeTop", while the test with a pre-defined environment:
 
-Testing is done in "Eval_tests.hs". Interpreting the following let bindings:
+    ranges' [("x", RangeTuple [(1, 5)])] (Add (CstInt 3) (Var "x"))
 
-(Let "y" (RandomInt (CstInt 1) (CstInt 5)) 
-    (Let "x" (RandomInt (CstInt 1) (CstInt 10)) 
-        (Let "z" (Add (Var "x") (Var "y"))
-            (Var "z")))) 
+returns "RangeTuple [(4, 8)])". BUT if we simply interpret the expression:
 
-... yields the result:            
+    (Var "x")
 
-    [("z", ValIntRange 2 15), ("y", ValIntRange 1 5), ("x", ValIntRange 1 10)]
+we would get "RangeBottom" instead.
 
-The result is always represented in reverse alphabetical order and represents an abstraction of the ranges a variable spans after it is evaluated fully.
-Note that the last line of the code "(Var "z")" does absolutely nothing to the analysis and could be an arbitrary expression.
-Lastly, I note that all variables should be classified by unique identifiers even though they are not in the same scope - otherwise the interpreter performs a unionization of the ranges.
+The interpreter forms lattices with resp. RangeTop and RangeBottom at the top and bottom of the lattice.
+Testing is done in "Eval_tests.hs". Interpreting a more complex example:
 
-The code is based on the code given in the AP-course (specifically "week 3") - Thank you!
+    ranges' [("y", RangeTuple [(0, 1), (4, 5)])] (Apply (Lambda ("x") (Add (Var "x") (CstInt 1))) (Var "y"))
+
+yields the result "RangeTuple [(1, 2), (5, 6)]" as expected.
+
+The tuples are always sorted based on the last element to retain the logic of the interpreter.
+Lastly, I note that all variables should be classified by unique identifiers even though they are not in the same scope - otherwise the behaviour is undefined.
+
+The code is based on the code given in the AP-course (specifically week 2 and 3) - Thank you!
