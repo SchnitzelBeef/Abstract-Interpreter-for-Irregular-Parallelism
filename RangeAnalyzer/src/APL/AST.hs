@@ -6,7 +6,7 @@ where
 
 type VName = String
 
-{- The APL grammar provided by Troels Henriksen -}
+{- The APL grammar provided by Troels Henriksen (without explicit tuples) -}
 data Exp
   = CstInt Int
   | CstBool Bool
@@ -15,8 +15,6 @@ data Exp
   | Mul Exp Exp
   | Eql Exp Exp
   | If Exp Exp Exp
-  | Tuple [Exp]
-  | Project Exp Int
   | Var VName
   | Lambda VName Exp
   | Apply Exp Exp

@@ -11,12 +11,11 @@ where
 
 import Control.Monad (ap, liftM)
 import APL.AST (Exp (..), VName)
-import System.Posix.Internals (lstat)
-import APL.Eval (Val (..), eval)
 
 type Range = (Int, Int)
 
--- RangeTuples are always sorted based on the end of the range 
+-- An invariant to the RangeTuple, is that they are always sorted based on the end of the range
+-- I.e. RangeTuple [(1, 4), (100, 200)] is valid, but RangeTuple [(1, 4), (-1, 0)] isn't
 data RangeVal = RangeTop
   | RangeBottom 
   | RangeTuple [Range]
@@ -28,9 +27,6 @@ type Env = [(VName, RangeVal)]
 
 envEmpty :: Env
 envEmpty = []
-
-envExtend :: VName -> RangeVal -> Env -> Env
-envExtend v val env = (v, val) : env
 
 envLookup :: VName -> Env -> Maybe RangeVal
 envLookup v env = lookup v env
@@ -64,46 +60,39 @@ localEnv f (EvalM m) = EvalM $ \env -> m (f env)
 failure :: String -> EvalM a
 failure s = EvalM $ \_env -> Left s
 
-catch :: EvalM a -> EvalM a -> EvalM a
-catch (EvalM m1) (EvalM m2) = EvalM $ \env ->
-  case m1 env of
-    Left _ -> m2 env
-    Right x -> Right x
-
+{- Joins two tuples, i.e. ranges [(1, 10), (5, 12)] becomes [(1, 12)], should only be called from rangesJoin-}
 tupleJoin :: [Range] -> [Range] -> [Range]
-tupleJoin [] [] = []
 tupleJoin [] lst = lst
 tupleJoin lst [] = lst
 tupleJoin lst1@((int1, int2):rest1) lst2@((int3, int4):rest2)
+  | int2 + 1 == int3 || int4 + 1 == int1 = (min int1 int3, max int2 int4) : tupleJoin rest1 rest2 -- Intervals next to each other 
   | int2 >= int3 && int4 >= int1 = (min int1 int3, max int2 int4) : tupleJoin rest1 rest2 -- Overlap of intervals 
   | int2 < int3 = (int1, int2) : tupleJoin rest1 lst2
   | otherwise = (int3, int4) : tupleJoin lst1 rest2
 
+{- Joins two ranges, forming a lattice-}
 rangesJoin :: RangeVal -> RangeVal -> RangeVal
-rangesJoin (RangeTuple lst1) (RangeTuple lst2) = RangeTuple $ tupleJoin lst1 lst2
--- rangesJoin (int1, int2) (RangeTuple lst@((int3, int4):rest2))
---   | int2 >= int3 && int4 >= int1 = RangeTuple $ Range (min int1 int3) (max int2 int4) : rest2 -- Overlap of intervals 
---   | int2 < int3 = rangesJoin (Range int1 int2) (RangeTuple rest2)
---   | otherwise = RangeTuple $ Range int3 int4 : lst
--- rangesJoin (int1, int2) (int3, int4)
---   | int2 >= int3 && int4 >= int1 = Range (min int1 int3) (max int2 int4) -- Overlap of intervals 
---   | int2 < int3 = RangeTuple [Range int1 int2, Range int3 int4]
---   | otherwise = RangeTuple [Range int3 int4, Range int1 int2]
+rangesJoin (RangeTuple lst1) (RangeTuple lst2) = 
+  let lst = tupleJoin lst1 lst2
+  in
+    if lst == []
+      then RangeBottom 
+      else RangeTuple $ lst
 rangesJoin _ RangeTop = RangeTop
 rangesJoin RangeTop _ = RangeTop
-rangesJoin any RangeBottom = any
-rangesJoin RangeBottom any = any
--- rangesJoin any (int1, int2) = rangesJoin (int1, int2) any 
+rangesJoin r RangeBottom = r
+rangesJoin RangeBottom r = r
 
+{- Intersects two tuples, i.e. ranges [(1, 10), (5, 12)] becomes [(5, 10)], should only be called from rangesIntersect-}
 tupleIntersect :: [Range] -> [Range] -> [Range]
-tupleIntersect [] [] = []
-tupleIntersect [] lst = []
-tupleIntersect lst [] = []
+tupleIntersect [] _ = []
+tupleIntersect _ [] = []
 tupleIntersect lst1@((int1, int2):rest1) lst2@((int3, int4):rest2)
   | int2 >= int3 && int4 >= int1 = (max int1 int3, min int2 int4) : tupleIntersect rest1 rest2 -- Overlap of intervals 
   | int2 < int3 = tupleIntersect rest1 lst2
   | otherwise = tupleIntersect lst1 rest2
 
+{- Intersects two ranges, only used in intersecting environments -}
 rangesIntersect :: RangeVal -> RangeVal -> RangeVal
 rangesIntersect (RangeTuple lst1) (RangeTuple lst2) = 
   let lst = tupleIntersect lst1 lst2
@@ -111,22 +100,13 @@ rangesIntersect (RangeTuple lst1) (RangeTuple lst2) =
     if lst == []
       then RangeBottom
       else RangeTuple lst 
--- rangesIntersect (int1, int2) (RangeTuple lst@((int3, int4):rest2))
---   | int2 >= int3 && int4 >= int1 = RangeTuple $ Range (min int1 int3) (max int2 int4) : rest2 -- Overlap of intervals 
---   | int2 < int3 = rangesIntersect (Range int1 int2) (RangeTuple rest2)
---   | otherwise = RangeTuple $ Range int3 int4 : lst
--- rangesIntersect (int1, int2) (int3, int4)
---   | int2 >= int3 && int4 >= int1 = Range (min int1 int3) (max int2 int4) -- Overlap of intervals 
---   | int2 < int3 = RangeTuple [Range int1 int2, Range int3 int4]
---   | otherwise = RangeTuple [Range int3 int4, Range int1 int2]
-rangesIntersect any RangeBottom = any
-rangesIntersect RangeBottom any = any
+rangesIntersect r RangeBottom = r
+rangesIntersect RangeBottom r = r
 rangesIntersect _ RangeTop = RangeTop
 rangesIntersect RangeTop _ = RangeTop
--- rangesIntersect any (int1, int2) = rangesIntersect (int1, int2) any 
 
+{- Intersects two environments, which is used in lambda definitions -}
 envIntersect :: Env -> Env -> Env
-envIntersect [] [] = []
 envIntersect env [] = env
 envIntersect [] env = env
 envIntersect ((name1, range1):rest1) ((name2, range2):rest2)
@@ -134,6 +114,7 @@ envIntersect ((name1, range1):rest1) ((name2, range2):rest2)
   | name1 < name2 = (name1, range1) : envIntersect rest1 ((name2, range2):rest2)
   | otherwise = (name2, range2) : envIntersect ((name1, range1):rest1) rest2 
 
+{- Identifies all free variables in the expression -}
 freeVNames :: Exp -> Env
 freeVNames (CstInt _) = envEmpty
 freeVNames (CstBool _) = envEmpty
@@ -142,52 +123,41 @@ freeVNames (Sub e1 e2) = freeVNames e1 `envIntersect` freeVNames e2
 freeVNames (Mul e1 e2) = freeVNames e1 `envIntersect` freeVNames e2  
 freeVNames (Eql e1 e2) = freeVNames e1 `envIntersect` freeVNames e2  
 freeVNames (If e1 e2 e3) = freeVNames e1 `envIntersect` freeVNames e2 `envIntersect` freeVNames e3 
-freeVNames (Tuple exps) = foldl (\acc elm -> acc `envIntersect` freeVNames elm) envEmpty exps
-freeVNames (Project e _) = freeVNames e
 freeVNames (Var name) = [(name, RangeBottom)]
 freeVNames (Lambda name e) = [(name, RangeBottom)] `envIntersect` freeVNames e
 freeVNames (Apply e1 e2) = freeVNames e1 `envIntersect` freeVNames e2  
 freeVNames (ForLoop (name1, e1) (name2, e2) e3) = [(name1, RangeBottom)] `envIntersect` [(name2, RangeBottom)] `envIntersect` freeVNames e1 `envIntersect` freeVNames e2 `envIntersect` freeVNames e3 
 
-binopRange :: (Int -> Int -> Int) -> RangeVal -> RangeVal -> RangeVal
-binopRange _ RangeTop _ = RangeTop
-binopRange _ _ RangeTop = RangeTop 
-binopRange _ RangeBottom any = RangeTop -- This logic might be a bit iffy
-binopRange _ any RangeBottom = RangeTop -- This logic might be a bit iffy
-binopRange _ RangeBottom RangeBottom = RangeBottom
-binopRange _ (RangeTuple []) a = RangeTuple []
-binopRange _ a (RangeTuple []) = RangeTuple []
-binopRange op lst1@(RangeTuple ((int1, int2):rest1)) lst2@(RangeTuple ((int3, int4):rest2)) =
-  let (a,b) = (op int1 int3, op int2 int4)
-  in rangesJoin (RangeTuple [(min a b, max a b)]) (rangesJoin (binopRange op lst1 (RangeTuple rest2)) (binopRange op (RangeTuple rest1) lst2))
+{- Applies simple binary operator to a RangeVal, where it is ensured that the result is between the minimum and maximum of the intervals-}
+simpleBinopRange :: (Int -> Int -> Int) -> RangeVal -> RangeVal -> RangeVal
+simpleBinopRange _ RangeTop _ = RangeTop
+simpleBinopRange _ _ RangeTop = RangeTop 
+simpleBinopRange _ RangeBottom _ = RangeTop -- This logic might be a bit iffy
+simpleBinopRange _ _ RangeBottom = RangeTop -- This logic might be a bit iffy
+simpleBinopRange _ (RangeTuple []) _ = RangeTuple []
+simpleBinopRange _ _ (RangeTuple []) = RangeTuple []
+simpleBinopRange op lst1@(RangeTuple ((int1, int2):rest1)) lst2@(RangeTuple ((int3, int4):rest2)) =
+  let lst = [op int1 int3, op int1 int4, op int2 int3, op int2 int4] -- Only works for the very-most simple of arithmetic
+  in rangesJoin (RangeTuple [(minimum lst, maximum lst)]) (rangesJoin (simpleBinopRange op lst1 (RangeTuple rest2)) (simpleBinopRange op (RangeTuple rest1) lst2))
 
+{- Creates an abstract interpretation of the current expression and returns the possible ranges the expression can take-}
 ranges :: Exp -> EvalM RangeVal
 ranges (CstInt val) = pure $ RangeTuple [(val, val)]
-ranges (CstBool val) = pure RangeTop
+ranges (CstBool _) = pure RangeTop
 ranges (Add e1 e2) = do
   v1 <- ranges e1
   v2 <- ranges e2
-  pure $ binopRange (+) v1 v2 
+  pure $ simpleBinopRange (+) v1 v2 
 ranges (Sub e1 e2) = do
   v1 <- ranges e1
   v2 <- ranges e2
-  pure $ binopRange (-) v1 v2 
--- ranges (Mul e1 e2) = do
---   v1 <- ranges e1
---   v2 <- ranges e2
---   pure $ binopRange (*) v1 v2 
-ranges (Eql e1 e2) = pure RangeTop
-  -- do
-  -- v1 <- ranges e1
-  -- v2 <- ranges e2
-  -- let v3 = v1 `rangesIntersect` v2
-  -- in
-  --   if v3 == RangeBottom
-  --     then RangeTop
-  --     else v3
-  -- pure $ v1 `rangesJoin` v2
-ranges (If e1 e2 e3) = do
+  pure $ simpleBinopRange (-) v1 v2 
+ranges (Mul e1 e2) = do
   v1 <- ranges e1
+  v2 <- ranges e2
+  pure $ simpleBinopRange (*) v1 v2 
+ranges (Eql _ _) = pure RangeBottom -- Might be wrong to return RangeBottom, but we lack better grammar for booleans
+ranges (If _ e2 e3) = do -- Currently just ignores e1, which is a point for improvement
   v2 <- ranges e2
   v3 <- ranges e3
   pure $ v2 `rangesJoin` v3 
@@ -196,15 +166,25 @@ ranges (Var v) = do
   case envLookup v env of
     Just x -> pure x
     Nothing -> failure $ "Unknown variable: " ++ v
--- ranges (Tuple exps) = 
--- ranges (Project e i) = do 
---   v1 <- ranges e
---   case v1 of
 ranges (Apply (Lambda name e1) e2) = do
   v2 <- ranges e2
   env <- askEnv
   localEnv (const $ [(name, v2)] `envIntersect` env) $ ranges e1
-ranges (Apply e1 e2) = ranges e1
-ranges (Lambda name e) = pure RangeTop
--- ranges (ForLoop (name1, e1) (name2, e2) body) = do
-
+ranges (Apply e1 _) = ranges e1
+ranges (Lambda _ _) = pure RangeBottom
+ranges (ForLoop (name1, e1) (name2, e2) body) = do
+  v1 <- ranges e1
+  v2 <- ranges e2
+  v3 <- loop v1 (0, v2)
+  pure v3
+  where loop acc (j, tpl@(RangeTuple ((n, m):_))) = do
+          env <- askEnv
+          v4 <- localEnv (const $ [(name1, acc), (name2, RangeTuple [(j, j)])] `envIntersect` env) $ ranges body
+          case v4 of
+            RangeTuple _ | j < n -> loop v4 (j+1, tpl)
+            RangeTuple _ | j >= m -> pure acc
+            RangeTuple _ -> do
+              v5 <- loop v4 (j+1, tpl)
+              pure $ v4 `rangesJoin` v5
+            r -> pure r
+        loop _ _ = pure RangeBottom -- This logic might be a bit shady
