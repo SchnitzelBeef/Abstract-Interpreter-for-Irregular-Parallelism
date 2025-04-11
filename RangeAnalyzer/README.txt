@@ -10,7 +10,7 @@ gives the result "RangeTop", while the test with a pre-defined environment:
 
         ranges' [("x", RangeTuple [(1, 5)])] (Add (CstInt 3) (Var "x"))
 
-returns "RangeTuple [(4, 8)])". BUT if we simply interpret the expression:
+returns "RangeTuple [(4, 8)]". BUT if we simply interpret the expression:
 
         (Var "x")
 

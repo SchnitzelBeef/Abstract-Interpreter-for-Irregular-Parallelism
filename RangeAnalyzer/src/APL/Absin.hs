@@ -76,7 +76,7 @@ rangesJoin (RangeTuple lst1) (RangeTuple lst2) =
   let lst = tupleJoin lst1 lst2
   in
     if lst == []
-      then RangeBottom 
+      then RangeBottom -- This case should not be possible given the current setup
       else RangeTuple $ lst
 rangesJoin _ RangeTop = RangeTop
 rangesJoin RangeTop _ = RangeTop
@@ -143,7 +143,7 @@ simpleBinopRange op lst1@(RangeTuple ((int1, int2):rest1)) lst2@(RangeTuple ((in
 {- Creates an abstract interpretation of the current expression and returns the possible ranges the expression can take-}
 ranges :: Exp -> EvalM RangeVal
 ranges (CstInt val) = pure $ RangeTuple [(val, val)]
-ranges (CstBool _) = pure RangeTop
+ranges (CstBool _) = pure RangeBottom
 ranges (Add e1 e2) = do
   v1 <- ranges e1
   v2 <- ranges e2
