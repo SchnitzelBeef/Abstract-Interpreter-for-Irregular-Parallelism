@@ -113,3 +113,5 @@ eval (Apply e1 e2) = do
       localEnv (const $ envExtend var arg f_env) $ eval body
     (_, _) ->
       failure "Cannot apply non-function"
+
+-- TODO: Define loop, tuple, and project
