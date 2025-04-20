@@ -18,8 +18,8 @@ type Range = (Int, Int)
 -- I.e. RangeTuple [Range 1 4, Range 100 200] is valid, but RangeTuple [Range 1, 4, Range -1, 0] isn't
 data RangeVal = RangeTop
   | RangeBottom
-  | Ranges [Range]
-  | RangeTuple [RangeVal]
+  | Ranges [Range]    -- all the ranges the value can take in a single variable, so e.g. Ranges [(1, 2), (6, 9)]
+  | RangeTuple [RangeVal]  -- the ranges of the actual tuple value type, so, RangeTuple [RangeTop, Ranges [(1, 5)]]
   deriving (Eq, Show)
 
 type Error = String
@@ -94,6 +94,7 @@ rangesIntersect (Ranges lst1) (Ranges lst2) = Ranges $ tupleIntersect lst1 lst2
           | otherwise = tupleIntersect lst1 rest2
 rangesIntersect a RangeTop = a
 rangesIntersect RangeTop a = a
+rangesIntersect _ _ = RangeBottom
 
 {- Intersects two environments, which is used in lambda definitions -}
 envIntersect :: Env -> Env -> Env
@@ -172,20 +173,20 @@ ranges (If _ e2 e3) = do -- Currently just ignores e1, which is a point for impr
   v2 <- ranges e2
   v3 <- ranges e3
   pure $ v2 `rangesJoin` v3
-ranges (Tuple exps) =
- if null exps
-  then do pure $ RangeTuple []
-  else do 
+ranges (Tuple exps)
+  | null exps = pure $ RangeTuple []
+  | otherwise = do
     v1 <- ranges $ head exps
     v2 <- ranges $ Tuple $ drop 1 exps 
     case (v1, v2) of
       (range, RangeTuple []) -> pure $ RangeTuple [range]
       (range, RangeTuple tpl) -> pure $ RangeTuple (range : tpl)
+      (_, _) -> failure $ "Tuple type malformed" -- Should not be possible
 ranges (Project e i) = do
   v1 <- ranges e
   case v1 of
     RangeTuple tpl -> pure $ tpl !! i
-    _ -> pure v1 -- Could throw error instead
+    _ -> failure $ "Projecting non-tuple"
 ranges (Var v) = do
   env <- askEnv
   case envLookup v env of

@@ -17,7 +17,7 @@ data Exp
   | If Exp Exp Exp
   | Tuple [Exp]
   | Project Exp Int
-  | Var VName 
+  | Var VName
   | Lambda VName Exp
   | Apply Exp Exp
   | ForLoop (VName, Exp) (VName, Exp) Exp
