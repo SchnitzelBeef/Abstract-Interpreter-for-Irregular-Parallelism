@@ -13,6 +13,7 @@ import Control.Monad (ap, liftM)
 data Val
   = ValInt Int
   | ValBool Bool
+  | ValTuple [Val]
   | ValFun Env VName Exp
   deriving (Eq, Show)
 
@@ -102,6 +103,20 @@ eval (If cond e1 e2) = do
     ValBool True -> eval e1
     ValBool False -> eval e2
     _ -> failure "Non-boolean conditional."
+eval (Tuple exps)
+  | null exps = pure $ ValTuple []
+  | otherwise = do
+    v1 <- eval $ head exps
+    v2 <- eval $ Tuple $ drop 1 exps
+    case (v1, v2) of
+      (_, ValTuple []) -> pure $ ValTuple [v1]
+      (_, ValTuple tpl) -> pure $ ValTuple (v1 : tpl)
+      (_, _) -> failure "Malformed tuple"
+eval (Project e i) = do
+  v1 <- eval e
+  case v1 of
+    ValTuple tpl -> pure $ tpl !! i
+    _ -> failure "Trying to project non-tuple"
 eval (Lambda var body) = do
   env <- askEnv
   pure $ ValFun env var body
@@ -113,3 +128,15 @@ eval (Apply e1 e2) = do
       localEnv (const $ envExtend var arg f_env) $ eval body
     (_, _) ->
       failure "Cannot apply non-function"
+eval (ForLoop (p, pe) (i, ie) body) = do
+  v1 <- eval pe
+  v2 <- eval ie
+  case v2 of
+    ValInt n -> loop v1 (0, n)
+    _ -> failure "Non-integer as termination in loop" 
+  where loop acc (j, n)
+          | j < n = do
+            env <- askEnv 
+            v3 <- localEnv (const $ envExtend i (ValInt j) $ envExtend p acc env) $ eval body
+            loop v3 (j+1, n)
+          | otherwise = pure acc

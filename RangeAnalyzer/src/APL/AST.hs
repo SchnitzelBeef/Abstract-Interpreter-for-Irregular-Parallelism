@@ -15,6 +15,8 @@ data Exp
   | Mul Exp Exp
   | Eql Exp Exp
   | If Exp Exp Exp
+  | Tuple [Exp]
+  | Project Exp Int
   | Var VName
   | Lambda VName Exp
   | Apply Exp Exp
