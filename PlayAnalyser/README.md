@@ -1,4 +1,4 @@
-## Play analyzer 
+# Play analyzer 
 Abstract interpreter of the (slightly extended) APL language provided by Troels Henriksen
 
 The interpreter makes sound - yet nowhere tight - abstractions on the language.
@@ -10,12 +10,12 @@ This would be the next step of improvements to split this into two separate abst
 
 Since the language is functional and has immutable variables, the interpreter has an "easy" time evaluating the span of an identifier only once.
 
-Testing is done in "Eval_tests.hs". Interpreting the following let bindings:
+Testing is done in "Eval_tests.hs" and is run by typing "cabal test". Interpreting the following let bindings:
 
-(Let "y" (RandomInt (CstInt 1) (CstInt 5)) 
-    (Let "x" (RandomInt (CstInt 1) (CstInt 10)) 
-        (Let "z" (Add (Var "x") (Var "y"))
-            (Var "z")))) 
+    (Let "y" (RandomInt (CstInt 1) (CstInt 5)) 
+        (Let "x" (RandomInt (CstInt 1) (CstInt 10)) 
+            (Let "z" (Add (Var "x") (Var "y"))
+                (Var "z")))) 
 
 ... yields the result:            
 

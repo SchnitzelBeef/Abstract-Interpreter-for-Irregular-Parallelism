@@ -179,11 +179,6 @@ ranges (Var v) = do
   case envLookup v env of
     Just x -> pure x
     Nothing -> failure $ "Unknown variable: " ++ v
--- ranges (Apply (Lambda name e1) e2) = do
---   v2 <- ranges e2
---   env <- askEnv
---   localEnv (const $ [(name, v2)] `envIntersect` env) $ ranges e1
--- ranges (Apply e1 _) = ranges e1
 ranges (Apply f e) = do
   v <- ranges e
   res <- ranges f
