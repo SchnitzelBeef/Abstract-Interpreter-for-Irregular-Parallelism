@@ -56,6 +56,12 @@ tests =
       testCase "Lambda on free variables" $
         ranges' [] (Apply (Lambda "x" (Add (Var "y") (Var "x"))) (CstInt 1))
           @?= Right RangeTop,
+      testCase "Apply without lambda" $
+        ranges' [] (Apply (Add (CstInt 3) (CstInt 10)) (Var "x"))
+          @?= Right RangeTop,
+      testCase "Pure lambda" $
+        ranges' [("y", Ranges [(1, 5)])] (Lambda "x" (Sub (Var "x") (Var "y")))
+          @?= Right (RangeFun [("x", RangeTop), ("y", Ranges [(1, 5)])] "x" (Sub (Var "x") (Var "y"))),
       testCase "Normal loop" $
         ranges' [] (ForLoop ("acc", CstInt 0) ("i", CstInt 10)
                       (Add (Var "acc") (Add (Var "i") (CstInt 1))))

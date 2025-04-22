@@ -184,7 +184,7 @@ ranges (Apply f e) = do
   res <- ranges f
   case res of 
     RangeFun env' p body -> localEnv (const $ [(p, v)] `envIntersect` env') $ ranges body
-    _ -> ranges e
+    _ -> ranges e -- Could be argued that this is simply RangeTop
 ranges (Lambda p body) = do
   env <- askEnv
   pure $ RangeFun env p body
