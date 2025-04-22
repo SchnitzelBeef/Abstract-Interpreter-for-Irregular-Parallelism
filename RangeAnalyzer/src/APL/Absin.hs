@@ -179,17 +179,12 @@ ranges (Var v) = do
   case envLookup v env of
     Just x -> pure x
     Nothing -> failure $ "Unknown variable: " ++ v
--- ranges (Apply (Lambda name e1) e2) = do
---   v2 <- ranges e2
---   env <- askEnv
---   localEnv (const $ [(name, v2)] `envIntersect` env) $ ranges e1
--- ranges (Apply e1 _) = ranges e1
 ranges (Apply f e) = do
   v <- ranges e
   res <- ranges f
   case res of 
     RangeFun env' p body -> localEnv (const $ [(p, v)] `envIntersect` env') $ ranges body
-    _ -> ranges e
+    _ -> ranges e -- Could be argued that this is simply RangeTop
 ranges (Lambda p body) = do
   env <- askEnv
   pure $ RangeFun env p body
