@@ -1,0 +1,5 @@
+def arithmetic (x: i32) : i32 =
+  x * x
+
+def main (n: i32) : i32 =
+  arithmetic n
